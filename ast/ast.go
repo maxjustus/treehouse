@@ -1,23 +1,30 @@
 package ast
 
-type ExplainAstRow struct {
-	Explain string
+import (
+	"container/list"
+)
+
+type Ast struct {
+	Root          *AstNode
+	Query         string
+	ParentAsts    []*Ast
+	DependentAsts []*Ast
 }
 
-func NewFromQuery(query string, execQueryFunc func(query string) *[]ExplainAstRow) (*Ast, error) {
-	lines := execQueryFunc("explain ast " + query)
+// TODO: return err instead of panicking
+type ExecQueryFunc func(query string) ([]string, error)
 
-	explainStrings := make([]string, len(*lines))
-
-	for i, row := range *lines {
-		explainStrings[i] = row.Explain
+func NewFromQuery(query string, execQueryFunc ExecQueryFunc) (*Ast, error) {
+	lines, error := execQueryFunc("explain ast " + query)
+	if error != nil {
+		return &Ast{}, error
 	}
 
-	return NewFromExplainQuery(query, explainStrings)
+	return NewFromExplainLines(query, lines)
 }
 
-func NewFromExplainQuery(query string, lines []string) (*Ast, error) {
-	rootNode, err := Parse(lines)
+func NewFromExplainLines(query string, lines []string) (*Ast, error) {
+	rootNode, err := Parse(query, lines)
 	if err != nil {
 		return &Ast{}, err
 	}
@@ -25,10 +32,98 @@ func NewFromExplainQuery(query string, lines []string) (*Ast, error) {
 	return &Ast{Root: rootNode, Query: query}, nil
 }
 
-type Ast struct {
-	Root          *AstNode
-	Query         string
-	DependentAsts []*Ast
+func containsAny(a []string, b []string) bool {
+	for _, valA := range a {
+		for _, valB := range b {
+			if valA == valB {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// TODO: add tests - maybe caching or multithreading of querying for ASTs - if perf necessitates..?
+func QueriesInTopologicalOrder(queries []string, execQueryFunc ExecQueryFunc) ([]string, error) {
+	asts := make([]*Ast, len(queries))
+
+	for i, query := range queries {
+		ast, err := NewFromQuery(query, execQueryFunc)
+		if err != nil {
+			return []string{}, err
+		}
+		asts[i] = ast
+	}
+
+	sortedAsts := PopulateAndSort(asts...)
+
+	sortedQueries := make([]string, len(sortedAsts))
+	for i, ast := range sortedAsts {
+		sortedQueries[i] = ast.Query
+	}
+
+	return sortedQueries, nil
+}
+
+// TODO: no panics in library code - return an error and leave it up to the caller to panic
+func PopulateAndSort(asts ...*Ast) []*Ast {
+	populateDependencyGraph(asts...)
+
+	queue := list.New()
+	output := make([]*Ast, 0)
+	nodeDegrees := make(map[*Ast]int)
+
+	for _, ast := range asts {
+		nodeDegrees[ast] = len(ast.ParentAsts)
+
+		if len(ast.ParentAsts) == 0 {
+			queue.PushBack(ast)
+		}
+	}
+
+	for queue.Len() > 0 {
+		element := queue.Front()
+		queue.Remove(element)
+		ast := element.Value.(*Ast)
+
+		output = append(output, ast)
+
+		for _, dependentAst := range ast.DependentAsts {
+			nodeDegrees[dependentAst]--
+
+			if nodeDegrees[dependentAst] <= 0 {
+				queue.PushBack(dependentAst)
+			}
+		}
+	}
+
+	if len(output) != len(asts) {
+		panic("cycle detected")
+	}
+
+	return output
+}
+
+func populateDependencyGraph(asts ...*Ast) {
+	for _, ast := range asts {
+		for _, dependentAst := range asts {
+			if dependentAst != ast {
+				ast.addDependentIfContainsAny(dependentAst, ast.CreateTableAndViewStatements(), dependentAst.TableAndViewIdentifiers())
+				ast.addDependentIfContainsAny(dependentAst, ast.CreateFunctionStatements(), dependentAst.FunctionCalls())
+			}
+		}
+	}
+}
+
+func (ast *Ast) addDependentIfContainsAny(dependentAst *Ast, a []string, b []string) {
+	if containsAny(a, b) {
+		ast.addDependent(dependentAst)
+	}
+}
+
+func (ast *Ast) addDependent(dependentAst *Ast) {
+	ast.DependentAsts = append(ast.DependentAsts, dependentAst)
+	dependentAst.ParentAsts = append(dependentAst.ParentAsts, ast)
 }
 
 func (a *Ast) ValuesForMatch(matcher func(node *AstNode) bool) []string {
@@ -43,14 +138,25 @@ func (a *Ast) ValuesForMatch(matcher func(node *AstNode) bool) []string {
 	return values
 }
 
-func (a *Ast) TableIdentifiers() []string {
+func (a *Ast) valuesForNodeType(nodeType string) []string {
 	return a.ValuesForMatch(func(node *AstNode) bool {
-		return node.Type == "TableIdentifier"
+		return node.Type == nodeType
 	})
 }
 
-func (a *Ast) CalledFunctions() []string {
-	return a.ValuesForMatch(func(node *AstNode) bool {
-		return node.Type == "Function"
-	})
+// TODO: document node types of interest
+func (a *Ast) TableAndViewIdentifiers() []string {
+	return a.valuesForNodeType("TableIdentifier")
+}
+
+func (a *Ast) CreateTableAndViewStatements() []string {
+	return a.valuesForNodeType("CreateQuery")
+}
+
+func (a *Ast) FunctionCalls() []string {
+	return a.valuesForNodeType("Function")
+}
+
+func (a *Ast) CreateFunctionStatements() []string {
+	return a.valuesForNodeType("CreateFunctionQuery")
 }

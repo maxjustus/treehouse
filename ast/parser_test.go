@@ -6,25 +6,8 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func astLines() []string {
-	return []string{
-		"SelectWithUnionQuery (children 1)",
-		" ExpressionList (children 1)",
-		"  SelectQuery (children 2)",
-		"   ExpressionList (children 1)",
-		"    Asterisk",
-		"    Identifier z (alias n)",
-		"    Function z (alias r) (children 1)",
-		"     ExpressionList",
-		"   TablesInSelectQuery (children 1)",
-		"    TablesInSelectQueryElement (children 1)",
-		"     TableExpression (children 1)",
-		"      TableIdentifier x",
-	}
-}
-
 func TestParse(t *testing.T) {
-	root, err := Parse(astLines())
+	root, err := Parse("", astLines())
 
 	assert.Nil(t, err)
 
@@ -43,18 +26,31 @@ func TestParse(t *testing.T) {
 	assert.Equal(t, "TableIdentifier", root.Children[0].Children[0].Children[1].Children[0].Children[0].Children[0].Type)
 }
 
-func TestTableIdentifiers(t *testing.T) {
-	ast, _ := NewFromExplainQuery("raw query", astLines())
+func TestParseCreateMaterializedView(t *testing.T) {
+	query := "CREATE MATERIALIZED ViEW \n my_table_or_view to some_table AS select * from z;"
+	root, err := Parse(query, createQueryAstLines())
 
-	tableIdentifiers := ast.TableIdentifiers()
+	assert.Nil(t, err)
 
-	assert.Equal(t, []string{"x"}, tableIdentifiers)
+	assert.Equal(t, "CreateQuery", root.Type)
+	assert.Equal(t, "MateralizedViewToTable", root.Children[0].Type)
+	assert.Equal(t, "some_table", root.Children[0].Value)
+	assert.Equal(t, "TableIdentifier", root.Children[0].Children[0].Type)
+	assert.Equal(t, "some_table", root.Children[0].Children[0].Value)
 }
 
-func TestCalledFunctions(t *testing.T) {
-	ast, _ := NewFromExplainQuery("raw query", astLines())
+func TestTableIdentifiers(t *testing.T) {
+	ast, _ := NewFromExplainLines("raw query", astLines())
 
-	calledFunctions := ast.CalledFunctions()
+	tableIdentifiers := ast.TableAndViewIdentifiers()
+
+	assert.Equal(t, []string{"my_table_or_view"}, tableIdentifiers)
+}
+
+func TestFunctionCalls(t *testing.T) {
+	ast, _ := NewFromExplainLines("raw query", astLines())
+
+	calledFunctions := ast.FunctionCalls()
 
 	assert.Equal(t, []string{"z"}, calledFunctions)
 }

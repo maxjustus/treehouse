@@ -2,6 +2,7 @@ package ast
 
 import (
 	"regexp"
+	"strings"
 )
 
 var aliasRegex = regexp.MustCompile(`\(alias ([^)]+)\)`)
@@ -27,14 +28,14 @@ var typeOnlyHandler = lineHandler{
 }
 
 var typeWithValueHandler = lineHandler{
-	Matcher: regexp.MustCompile("^( *)([^ ]+) ([^ ]*)$"),
+	Matcher: regexp.MustCompile("^( *)([^ ]+) +([^ ]*)$"),
 	MatchCallback: func(matches []string, node *AstNode) {
 		node.Value = matches[3]
 	},
 }
 
 var typeWithMetaHandler = lineHandler{
-	Matcher: regexp.MustCompile(`^( *)([^ ]+) \((.+)\)$`),
+	Matcher: regexp.MustCompile(`^( *)([^ ]+) +\((.+)\)$`),
 	MatchCallback: func(matches []string, node *AstNode) {
 		node.Meta = matches[3]
 		node.Alias = aliasFromMeta(matches[3])
@@ -42,7 +43,7 @@ var typeWithMetaHandler = lineHandler{
 }
 
 var typeWithValueAndMetaHandler = lineHandler{
-	Matcher: regexp.MustCompile(`^( *)([^ ]+) ([^ ]*) (\(.+\))$`),
+	Matcher: regexp.MustCompile(`^( *)([^ ]+) +([^ ]*) +(\(.+\))$`),
 	MatchCallback: func(matches []string, node *AstNode) {
 		node.Value = matches[3]
 		node.Meta = matches[4]
@@ -57,7 +58,6 @@ var allHandlers = []lineHandler{
 	typeWithValueAndMetaHandler,
 }
 
-// TODO: simplify handleMatch
 func applyLineHandlers(line string, handleMatch func(r *regexp.Regexp, line string, cb func(matches []string, line *AstNode)) bool) bool {
 	for _, handler := range allHandlers {
 		if handleMatch(handler.Matcher, line, handler.MatchCallback) {
@@ -68,10 +68,27 @@ func applyLineHandlers(line string, handleMatch func(r *regexp.Regexp, line stri
 	return false
 }
 
-// ultimate goal will be to construct a tree of AST nodes
-// with root nodes also containing the query string.
-// the roots of the tree represent the top-level queries
-func Parse(lines []string) (root *AstNode, err error) {
+var materializedViewToTableRegex = regexp.MustCompile(`create\s+materialized\s+view\s+\w+\s+to\s+(\w+)`)
+
+// Works around the fact that explain AST doesn't include the "to" table name for materialized views.
+func addMaterializedViewToNode(node *AstNode, sourceQuery string) {
+	lowerQuery := strings.ToLower(sourceQuery)
+	mvToTableMatch := materializedViewToTableRegex.FindStringSubmatch(lowerQuery)
+	if mvToTableMatch != nil {
+		node.Children = append(node.Children, &AstNode{
+			Type:  "MateralizedViewToTable",
+			Value: mvToTableMatch[1],
+			Children: []*AstNode{
+				{
+					Type:  "TableIdentifier",
+					Value: mvToTableMatch[1],
+				},
+			},
+		})
+	}
+}
+
+func Parse(sourceQuery string, lines []string) (root *AstNode, err error) {
 	var previousLine *AstNode
 
 	handleMatch := func(r *regexp.Regexp, line string, cb func(matches []string, line *AstNode)) bool {
@@ -117,6 +134,10 @@ func Parse(lines []string) (root *AstNode, err error) {
 				root = &parsedLine
 			}
 
+			if parsedLine.Type == "CreateQuery" {
+				addMaterializedViewToNode(&parsedLine, sourceQuery)
+			}
+
 			previousLine = &parsedLine
 
 			return true
@@ -126,7 +147,7 @@ func Parse(lines []string) (root *AstNode, err error) {
 	}
 
 	for _, line := range lines {
-		if line == "" {
+		if line == "" || strings.HasPrefix(line, "Explain EXPLAIN AST ") {
 			continue
 		}
 

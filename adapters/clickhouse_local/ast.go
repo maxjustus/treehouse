@@ -8,15 +8,20 @@ import (
 )
 
 func AstForQuery(query string) (*ast.Ast, error) {
-	return ast.NewFromExplainQuery(query, explainAstRowsForQuery(query))
+	lines, err := explainAstRowsForQuery(query)
+	if err != nil {
+		return &ast.Ast{}, err
+	}
+
+	return ast.NewFromExplainLines(query, lines)
 }
 
-func explainAstRowsForQuery(query string) []string {
+func explainAstRowsForQuery(query string) ([]string, error) {
 	// invoke clickhouse-local command below using shell
 	out, err := exec.Command("sh", "-c", "clickhouse-local --query \"explain ast "+query+"\"").Output()
 	if err != nil {
-		panic(err)
+		return []string{}, err
+	} else {
+		return strings.Split(string(out), "\n"), err
 	}
-
-	return strings.Split(string(out), "\n")
 }
