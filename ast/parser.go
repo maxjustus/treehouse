@@ -27,8 +27,10 @@ var typeOnlyHandler = lineHandler{
 	MatchCallback: func(matches []string, node *AstNode) {},
 }
 
+// Doesn't handle literals that contain spaces. That's a problem.
+// form will be "Literal ' '"
 var typeWithValueHandler = lineHandler{
-	Matcher: regexp.MustCompile("^( *)([^ ]+) +([^ ]*)$"),
+	Matcher: regexp.MustCompile("^( *)([^ ]+) +('[^']+'|[^ ]+)$"),
 	MatchCallback: func(matches []string, node *AstNode) {
 		node.Value = matches[3]
 	},
@@ -43,7 +45,7 @@ var typeWithMetaHandler = lineHandler{
 }
 
 var typeWithValueAndMetaHandler = lineHandler{
-	Matcher: regexp.MustCompile(`^( *)([^ ]+) +([^ ]*) +(\(.+\))$`),
+	Matcher: regexp.MustCompile(`^( *)([^ ]+) +([^']+'|[^ ]+) +(\(.+\))$`),
 	MatchCallback: func(matches []string, node *AstNode) {
 		node.Value = matches[3]
 		node.Meta = matches[4]
