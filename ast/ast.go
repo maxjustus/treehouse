@@ -14,7 +14,7 @@ type Ast struct {
 }
 
 // TODO: return err instead of panicking
-type ExecQueryFunc func(query string) ([]string, error)
+type ExecQueryFunc func(query string) ([]map[string]interface{}, error)
 
 var sqlCommentRegex = regexp.MustCompile(`(?m)^\s*\-\-.*$`)
 
@@ -23,13 +23,25 @@ func stripSqlComments(query string) string {
 	return sqlCommentRegex.ReplaceAllString(query, "")
 }
 
+var emptyQueryRegex = regexp.MustCompile(`^\s*$`)
+
 func NewFromQuery(query string, execQueryFunc ExecQueryFunc) (*Ast, error) {
+	if emptyQueryRegex.MatchString(query) {
+		return &Ast{}, fmt.Errorf("query cannot be empty")
+	}
+
 	lines, error := execQueryFunc("explain ast " + stripSqlComments(query))
 	if error != nil {
 		return &Ast{}, error
 	}
 
-	return NewFromExplainLines(query, lines)
+	linesStr := make([]string, len(lines))
+
+	for i, line := range lines {
+		linesStr[i] = line["explain"].(string)
+	}
+
+	return NewFromExplainLines(query, linesStr)
 }
 
 func NewFromExplainLines(query string, lines []string) (*Ast, error) {
@@ -54,14 +66,18 @@ func containsAny(a []string, b []string) bool {
 
 // TODO: add tests - maybe caching or multithreading of querying for ASTs - if perf necessitates..?
 func QueriesInTopologicalOrder(queries []string, execQueryFunc ExecQueryFunc) ([]string, error) {
-	asts := make([]*Ast, len(queries))
+	asts := make([]*Ast, 0, len(queries))
 
-	for i, query := range queries {
+	for _, query := range queries {
+		if emptyQueryRegex.MatchString(query) {
+			continue
+		}
+
 		ast, err := NewFromQuery(query, execQueryFunc)
 		if err != nil {
 			return []string{}, err
 		}
-		asts[i] = ast
+		asts = append(asts, ast)
 	}
 
 	sortedAsts, err := PopulateAndSort(asts...)

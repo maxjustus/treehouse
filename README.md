@@ -1,4 +1,4 @@
-# ch-ast-pal
+# TreeHouse
 
 A utility for parsing, introspecting and manipulating ClickHouse ASTs from the output of `explain ast`
 

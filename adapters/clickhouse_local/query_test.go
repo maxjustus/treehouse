@@ -12,9 +12,9 @@ func AstForQuery(query string) (*ast.Ast, error) {
 }
 
 func TestAstForQuery(t *testing.T) {
-	r, err := AstForQuery("select * from x")
+	r, err := AstForQuery("create table test (a Int32) Engine=MergeTree order by a")
 
 	assert.NoError(t, err)
 
-	assert.Equal(t, "SelectWithUnionQuery", r.Root.Type)
+	assert.Equal(t, "CreateQuery", r.Root.Type)
 }
