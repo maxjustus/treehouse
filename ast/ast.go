@@ -77,6 +77,22 @@ func QueriesInTopologicalOrder(queries []string, execQueryFunc ExecQueryFunc) ([
 	return sortedQueries, nil
 }
 
+func RunQueriesInTopologicalOrder(queries []string, execQueryFunc ExecQueryFunc) error {
+	sortedQueries, err := QueriesInTopologicalOrder(queries, execQueryFunc)
+	if err != nil {
+		return err
+	}
+
+	for _, query := range sortedQueries {
+		_, err := execQueryFunc(query)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func PopulateAndSort(asts ...*Ast) ([]*Ast, error) {
 	populateDependencyGraph(asts...)
 
