@@ -42,6 +42,7 @@ func TestSortedQueriesFromDependencyGraph(t *testing.T) {
 func TestQueriesInTopologicalOrder(t *testing.T) {
 	// TODO: put actual queries
 	t1 := "create table t1 (z Int64) engine=MergeTree order by z"
+	a1 := "alter table t1 add column b UInt8"
 	f1 := "create function f1 as () -> true"
 	v1 := "create view v1 as select *, f1() as y from t1"
 	v2 := "create view v2 as select * from v1"
@@ -50,6 +51,7 @@ func TestQueriesInTopologicalOrder(t *testing.T) {
 
 	// TODO: make sure this API for entry point is decent and consistent
 	out, err := QueriesInTopologicalOrder([]string{
+		a1,
 		mv1,
 		mv1_dst_t,
 		t1,
@@ -64,6 +66,7 @@ func TestQueriesInTopologicalOrder(t *testing.T) {
 		mv1_dst_t,
 		t1,
 		f1,
+		a1,
 		v1,
 		v2,
 		mv1,

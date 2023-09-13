@@ -13,6 +13,8 @@ Goals of this project:
   - could print AST as JSON, etc.
 - Provide functionality for generating a directed acyclic graph of multiple queries such that any queries which create tables/views/materialized views/functions are
   parents of queries which depend on them.
+  - Should also consider queries that depend on columns added, changed or removed by other statements
+    - Could even consider column types, but that might explode out complexity
   - Provide functionality for outputting the DAG as a sorted SQL file for execution against a database.
 - Provide functionality for reformatting queries from their ASTs
 - Provide functionality for diffing ASTs

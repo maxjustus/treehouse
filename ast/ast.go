@@ -149,10 +149,14 @@ func PopulateAndSort(asts ...*Ast) ([]*Ast, error) {
 
 func populateDependencyGraph(asts ...*Ast) {
 	for _, ast := range asts {
+		createTableAndViewStatements := ast.CreateTableAndViewStatements()
+		createFunctionStatements := ast.CreateFunctionStatements()
+
 		for _, dependentAst := range asts {
 			if dependentAst != ast {
-				ast.addDependentIfContainsAny(dependentAst, ast.CreateTableAndViewStatements(), dependentAst.TableAndViewIdentifiers())
-				ast.addDependentIfContainsAny(dependentAst, ast.CreateFunctionStatements(), dependentAst.FunctionCalls())
+				ast.addDependentIfContainsAny(dependentAst, createTableAndViewStatements, dependentAst.TableAndViewIdentifiers())
+				ast.addDependentIfContainsAny(dependentAst, createTableAndViewStatements, dependentAst.AlterQueryStatements())
+				ast.addDependentIfContainsAny(dependentAst, createFunctionStatements, dependentAst.FunctionCalls())
 			}
 		}
 	}
@@ -194,6 +198,10 @@ func (a *Ast) TableAndViewIdentifiers() []string {
 
 func (a *Ast) CreateTableAndViewStatements() []string {
 	return a.valuesForNodeType("CreateQuery")
+}
+
+func (a *Ast) AlterQueryStatements() []string {
+	return a.valuesForNodeType("AlterQuery")
 }
 
 func (a *Ast) FunctionCalls() []string {
