@@ -1,6 +1,7 @@
 package ast
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 )
@@ -27,10 +28,12 @@ var typeOnlyHandler = lineHandler{
 	MatchCallback: func(matches []string, node *AstNode) {},
 }
 
+var valueStringPattern = `([^ ]*|[^ ]*'(?:.*)?'[^ ]?)`
+
 // Doesn't handle literals that contain spaces. That's a problem.
 // form will be "Literal ' '"
 var typeWithValueHandler = lineHandler{
-	Matcher: regexp.MustCompile("^( *)([^ ]+) +('[^']+'|[^ ]+)$"),
+	Matcher: regexp.MustCompile(fmt.Sprintf("^( *)([^ ]+) +%s$", valueStringPattern)),
 	MatchCallback: func(matches []string, node *AstNode) {
 		node.Value = matches[3]
 	},
@@ -45,7 +48,7 @@ var typeWithMetaHandler = lineHandler{
 }
 
 var typeWithValueAndMetaHandler = lineHandler{
-	Matcher: regexp.MustCompile(`^( *)([^ ]+) +([^']+'|[^ ]+) +(\(.+\))$`),
+	Matcher: regexp.MustCompile(fmt.Sprintf(`^( *)([^ ]+) +%s +(\(.+\))$`, valueStringPattern)),
 	MatchCallback: func(matches []string, node *AstNode) {
 		node.Value = matches[3]
 		node.Meta = matches[4]

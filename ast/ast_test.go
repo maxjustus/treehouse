@@ -3,6 +3,7 @@ package ast
 import (
 	"testing"
 
+	"github.com/k0kubun/pp"
 	"github.com/maxjustus/treehouse/adapters/clickhouse_local"
 	"github.com/stretchr/testify/assert"
 )
@@ -17,6 +18,7 @@ func TestPopulateDependencyGraph(t *testing.T) {
 
 	// TODO: relationship is many to many. so multiple parents are possible.
 	assert.Equal(t, ast1.ParentAsts, []*Ast{ast2, ast3})
+	pp.Println(ast1)
 	assert.Equal(t, ast2.DependentAsts[0], ast1)
 	assert.Equal(t, ast3.DependentAsts[0], ast1)
 }
