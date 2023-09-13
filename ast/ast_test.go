@@ -1,23 +1,11 @@
 package ast
 
 import (
-	"os/exec"
-	"strings"
 	"testing"
 
+	"github.com/maxjustus/treehouse/adapters/clickhouse_local"
 	"github.com/stretchr/testify/assert"
 )
-
-func queryClickHouseLocal(query string) ([]string, error) {
-	// invoke clickhouse-local command below using shell
-	out, err := exec.Command("sh", "-c", "clickhouse-local --query \"explain ast "+query+"\"").Output()
-	if err != nil {
-		return []string{}, err
-	}
-
-	lines := strings.Split(string(out), "\n")
-	return lines, nil
-}
 
 func TestPopulateDependencyGraph(t *testing.T) {
 	ast1, _ := NewFromExplainLines("query func", astLines())
@@ -68,7 +56,7 @@ func TestQueriesInTopologicalOrder(t *testing.T) {
 		v1,
 		v2,
 		f1,
-	}, queryClickHouseLocal)
+	}, clickhouse_local.ExecQuery)
 
 	assert.NoError(t, err)
 
@@ -100,6 +88,6 @@ func BenchmarkQueriesInTopologicalOrder(b *testing.B) {
 			v1,
 			v2,
 			f1,
-		}, queryClickHouseLocal)
+		}, clickhouse_local.ExecQuery)
 	}
 }

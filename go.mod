@@ -1,4 +1,4 @@
-module github.com/maxjustus/ch-ast-pal
+module github.com/maxjustus/treehouse
 
 go 1.20
 
