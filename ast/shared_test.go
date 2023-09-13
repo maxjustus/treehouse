@@ -40,6 +40,7 @@ func createQueryAstLines() []string {
 		"    ExpressionList (children 2)",
 		"     Asterisk",
 		"     Literal 'a literal with spaces'",
+		"     Literal Array_['an', 'array', 'literal']",
 		"    TablesInSelectQuery (children 1)",
 		"     TablesInSelectQueryElement (children 1)",
 		"      TableExpression (children 1)",
