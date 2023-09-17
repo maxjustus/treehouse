@@ -64,7 +64,7 @@ func containsAny(a []string, b []string) bool {
 	return false
 }
 
-// TODO: add tests - maybe caching or multithreading of querying for ASTs - if perf necessitates..?
+// TODO: explore adding caching or multithreading of querying for ASTs - if perf necessitates..?
 func QueriesInTopologicalOrder(queries []string, execQueryFunc ExecQueryFunc) ([]string, error) {
 	asts := make([]*Ast, 0, len(queries))
 
@@ -152,11 +152,45 @@ func populateDependencyGraph(asts ...*Ast) {
 		createTableAndViewStatements := ast.CreateTableAndViewStatements()
 		createFunctionStatements := ast.CreateFunctionStatements()
 
-		for _, dependentAst := range asts {
-			if dependentAst != ast {
-				ast.addDependentIfContainsAny(dependentAst, createTableAndViewStatements, dependentAst.TableAndViewIdentifiers())
-				ast.addDependentIfContainsAny(dependentAst, createTableAndViewStatements, dependentAst.AlterQueryStatements())
-				ast.addDependentIfContainsAny(dependentAst, createFunctionStatements, dependentAst.FunctionCalls())
+		selectColumnIdentifiers := ast.SelectColumnIdentifiers()
+
+		createTableColumnDeclarations := ast.CreateTableColumnDeclarations()
+		addColumnDeclarations := ast.AddColumnDeclarations()
+		modifyColumnDeclarations := ast.ModifyColumnDeclarations()
+		commentColumnIdentifiers := ast.CommentColumnIdentifiers()
+		materializeColumnIdentifiers := ast.MaterializeColumnIdentifiers()
+		renameColumnFromIdentifiers := ast.RenameColumnFromIdentifiers()
+		renameColumnToIdentifiers := ast.RenameColumnToIdentifiers()
+		createAndAddColumnDeclarations := append(createTableColumnDeclarations, addColumnDeclarations...)
+		allOriginatingColumnIdentifiers := append(
+			createAndAddColumnDeclarations,
+			renameColumnToIdentifiers...)
+
+		for _, candidate := range asts {
+			if candidate != ast {
+				ast.addDependentIfContainsAny(candidate, createTableAndViewStatements, candidate.TableAndViewIdentifiers())
+				ast.addDependentIfContainsAny(candidate, createTableAndViewStatements, candidate.AlterQueryStatements())
+				ast.addDependentIfContainsAny(candidate, createFunctionStatements, candidate.FunctionCalls())
+
+				// wayyy slower now with all of this - TODO: optimize
+
+				// Column relationships
+				ast.addDependentIfContainsAny(candidate, allOriginatingColumnIdentifiers, candidate.SelectColumnIdentifiers())
+				ast.addDependentIfContainsAny(candidate, allOriginatingColumnIdentifiers, candidate.ModifyColumnDeclarations())
+				ast.addDependentIfContainsAny(candidate, allOriginatingColumnIdentifiers, candidate.CommentColumnIdentifiers())
+				ast.addDependentIfContainsAny(candidate, allOriginatingColumnIdentifiers, candidate.MaterializeColumnIdentifiers())
+				ast.addDependentIfContainsAny(candidate, allOriginatingColumnIdentifiers, candidate.RenameColumnFromIdentifiers())
+				ast.addDependentIfContainsAny(candidate, createAndAddColumnDeclarations, candidate.RenameColumnToIdentifiers())
+
+				// drop comes after add, modify, comment, materialize, rename
+				dropColumnIdentifiers := candidate.DropOrClearColumnIdentifiers()
+				ast.addDependentIfContainsAny(candidate, selectColumnIdentifiers, dropColumnIdentifiers)
+				ast.addDependentIfContainsAny(candidate, addColumnDeclarations, dropColumnIdentifiers)
+				ast.addDependentIfContainsAny(candidate, modifyColumnDeclarations, dropColumnIdentifiers)
+				ast.addDependentIfContainsAny(candidate, commentColumnIdentifiers, dropColumnIdentifiers)
+				ast.addDependentIfContainsAny(candidate, materializeColumnIdentifiers, dropColumnIdentifiers)
+				ast.addDependentIfContainsAny(candidate, renameColumnFromIdentifiers, dropColumnIdentifiers)
+				ast.addDependentIfContainsAny(candidate, renameColumnToIdentifiers, dropColumnIdentifiers)
 			}
 		}
 	}
@@ -191,7 +225,83 @@ func (a *Ast) valuesForNodeType(nodeType string) []string {
 	})
 }
 
+func descendentOf(node *AstNode, parentType string) bool {
+	if node.Parent == nil {
+		return false
+	} else if node.Parent.Type == parentType {
+		return true
+	} else {
+		return descendentOf(node.Parent, parentType)
+	}
+}
+
+func parentIsType(node *AstNode, parentType string) bool {
+	return node.Parent != nil && node.Parent.Type == parentType
+}
+
+func parentIsAlterColumn(node *AstNode, commandType string) bool {
+	return parentIsType(node, "AlterCommand") && node.Parent.Value == commandType
+}
+
+func (a *Ast) alterColumnIdentifiers(modificationType string, columnType string) []string {
+	return a.ValuesForMatch(func(node *AstNode) bool {
+		return parentIsAlterColumn(node, modificationType) && node.Type == columnType
+	})
+}
+
 // TODO: document node types of interest
+func (a *Ast) CreateTableColumnDeclarations() []string {
+	return a.ValuesForMatch(func(node *AstNode) bool {
+		return node.Type == "ColumnDeclaration" &&
+			parentIsType(node, "ExpressionList") &&
+			parentIsType(node.Parent, "Columns") &&
+			parentIsType(node.Parent.Parent, "CreateQuery")
+	})
+}
+
+func (a *Ast) AddColumnDeclarations() []string {
+	return a.alterColumnIdentifiers("ADD_COLUMN", "ColumnDeclaration")
+}
+
+// alter table clear column also uses drop column as the command type
+func (a *Ast) DropOrClearColumnIdentifiers() []string {
+	return a.alterColumnIdentifiers("DROP_COLUMN", "Identifier")
+}
+
+func (a *Ast) ModifyColumnDeclarations() []string {
+	return a.alterColumnIdentifiers("MODIFY_COLUMN", "ColumnDeclaration")
+}
+
+func (a *Ast) CommentColumnIdentifiers() []string {
+	return a.alterColumnIdentifiers("COMMENT_COLUMN", "Identifier")
+}
+
+func (a *Ast) MaterializeColumnIdentifiers() []string {
+	return a.alterColumnIdentifiers("MATERIALIZE_COLUMN", "Identifier")
+}
+
+func (a *Ast) RenameColumnFromIdentifiers() []string {
+	return a.ValuesForMatch(func(node *AstNode) bool {
+		return parentIsAlterColumn(node, "RENAME_COLUMN") &&
+			node.Type == "Identifier" &&
+			node.Parent.Children[0] == node
+	})
+}
+
+func (a *Ast) RenameColumnToIdentifiers() []string {
+	return a.ValuesForMatch(func(node *AstNode) bool {
+		return parentIsAlterColumn(node, "RENAME_COLUMN") &&
+			node.Type == "Identifier" &&
+			node.Parent.Children[1] == node
+	})
+}
+
+func (a *Ast) SelectColumnIdentifiers() []string {
+	return a.ValuesForMatch(func(node *AstNode) bool {
+		return node.Type == "Identifier" && descendentOf(node, "SelectQuery")
+	})
+}
+
 func (a *Ast) TableAndViewIdentifiers() []string {
 	return a.valuesForNodeType("TableIdentifier")
 }
