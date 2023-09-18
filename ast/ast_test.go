@@ -76,7 +76,7 @@ func TestQueriesInTopologicalOrder(t *testing.T) {
 	assert.Equal(t, expected, out)
 }
 
-func TestColumnQueryiesInTopologicalOrder(t *testing.T) {
+func TestColumnQueriesInTopologicalOrder(t *testing.T) {
 	q1 := "create table t1 (z Int64) engine=MergeTree order by z"
 	q2 := "alter table t1 add column b UInt8"
 	q3 := "alter table t1 add column c UInt8"
@@ -91,11 +91,13 @@ func TestColumnQueryiesInTopologicalOrder(t *testing.T) {
 	q12 := "alter table t1 drop column whatever"
 	q13 := "alter table t1 modify column whatever UInt32"
 	q14 := "create view v2 as select c from t1"
+	q15 := "select thing.whatever, v2.c from t1 as thing, v2"
 
 	// TODO: make sure this API for entry point is decent and consistent
 	out, err := QueriesInTopologicalOrder([]string{
 		q12,
 		q5,
+		q15,
 		q10,
 		q6,
 		q4,
@@ -125,8 +127,41 @@ func TestColumnQueryiesInTopologicalOrder(t *testing.T) {
 		q9,
 		q7,
 		q11,
-		q4,
+		q15,
 		q12,
+		q4,
+	}
+
+	assert.Equal(t, expected, out)
+}
+
+// FIXME: this test is not correct and exposes a flaw in ordering.
+func TestColumnQueryAliasesInTopologicalOrder(t *testing.T) {
+	q1 := "create table z.t1 (z Int64) engine=MergeTree order by z"
+	q2 := "create table t2 (z Int64) engine=MergeTree order by z"
+	q3 := "create table t3 (z Int64) engine=MergeTree order by z"
+	q4 := "create table t4 (z Int64) engine=MergeTree order by z"
+	q5 := "select something.z, t2.z, t3.z, t4.z from t1 as something, t2, t3, t4"
+	q6 := "alter table t1 rename column z to a"
+
+	out, err := QueriesInTopologicalOrder([]string{
+		q2,
+		q3,
+		q6,
+		q4,
+		q1,
+		q5,
+	}, clickhouse_local.ExecQuery)
+
+	assert.NoError(t, err)
+
+	expected := []string{
+		q2,
+		q3,
+		q4,
+		q1,
+		q6,
+		q5,
 	}
 
 	assert.Equal(t, expected, out)

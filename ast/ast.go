@@ -53,10 +53,10 @@ func NewFromExplainLines(query string, lines []string) (*Ast, error) {
 	return &Ast{Root: rootNode, Query: query}, nil
 }
 
-func containsAny(a []string, b []string) bool {
+func matchesAny[T, B any](a []T, b []B, matcher func(a T, b B) bool) bool {
 	for _, valA := range a {
 		for _, valB := range b {
-			if valA == valB {
+			if matcher(valA, valB) {
 				return true
 			}
 		}
@@ -169,12 +169,18 @@ func populateDependencyGraph(asts ...*Ast) {
 		for _, candidate := range asts {
 			if candidate != ast {
 				ast.addDependentIfContainsAny(candidate, createTableAndViewStatements, candidate.TableAndViewIdentifiers())
+				// TODO: select column identifiers need to have any aliases resolved to the table name.
+				// Also, all select column identifiers should add table name as value qualifier
+				// All of these need to change to use ast nodes instead of value strings so it's more flexible.
+
 				ast.addDependentIfContainsAny(candidate, createTableAndViewStatements, candidate.AlterQueryStatements())
 				ast.addDependentIfContainsAny(candidate, createFunctionStatements, candidate.FunctionCalls())
 
 				// wayyy slower now with all of this - TODO: optimize
 
 				// Column relationships
+				// TODO: these don't work right when multiple tables share column name. Get smarter about this.
+				// ast.addDependentIfContainsAny(candidate, allOriginatingColumnIdentifiers, candidate.SelectColumnTableQualifiers())
 				ast.addDependentIfContainsAny(candidate, allOriginatingColumnIdentifiers, candidate.SelectColumnIdentifiers())
 				ast.addDependentIfContainsAny(candidate, allOriginatingColumnIdentifiers, candidate.ModifyColumnDeclarations())
 				ast.addDependentIfContainsAny(candidate, allOriginatingColumnIdentifiers, candidate.CommentColumnIdentifiers())
@@ -196,10 +202,14 @@ func populateDependencyGraph(asts ...*Ast) {
 	}
 }
 
-func (ast *Ast) addDependentIfContainsAny(dependentAst *Ast, a []string, b []string) {
-	if containsAny(a, b) {
+func (ast *Ast) addDependentIfMatchesAny(dependentAst *Ast, a []string, b []string, matcher func(string, b string) bool) {
+	if matchesAny(a, b, matcher) {
 		ast.addDependent(dependentAst)
 	}
+}
+
+func (ast *Ast) addDependentIfContainsAny(dependentAst *Ast, a []string, b []string) {
+	ast.addDependentIfMatchesAny(dependentAst, a, b, func(a string, b string) bool { return a == b })
 }
 
 func (ast *Ast) addDependent(dependentAst *Ast) {
@@ -207,14 +217,26 @@ func (ast *Ast) addDependent(dependentAst *Ast) {
 	dependentAst.ParentAsts = append(dependentAst.ParentAsts, ast)
 }
 
-func (a *Ast) ValuesForMatch(matcher func(node *AstNode) bool) []string {
-	var values []string
+func (a *Ast) NodesForMatch(matcher func(node *AstNode) bool) []*AstNode {
+	var nodes []*AstNode
 
 	a.Root.Walk(func(node *AstNode) {
 		if matcher(node) {
-			values = append(values, node.Value)
+			nodes = append(nodes, node)
 		}
 	})
+
+	return nodes
+}
+
+func (a *Ast) ValuesForMatch(matcher func(node *AstNode) bool) []string {
+	nodes := a.NodesForMatch(matcher)
+
+	values := make([]string, len(nodes))
+
+	for i, node := range nodes {
+		values[i] = node.Value
+	}
 
 	return values
 }
@@ -225,27 +247,9 @@ func (a *Ast) valuesForNodeType(nodeType string) []string {
 	})
 }
 
-func descendentOf(node *AstNode, parentType string) bool {
-	if node.Parent == nil {
-		return false
-	} else if node.Parent.Type == parentType {
-		return true
-	} else {
-		return descendentOf(node.Parent, parentType)
-	}
-}
-
-func parentIsType(node *AstNode, parentType string) bool {
-	return node.Parent != nil && node.Parent.Type == parentType
-}
-
-func parentIsAlterColumn(node *AstNode, commandType string) bool {
-	return parentIsType(node, "AlterCommand") && node.Parent.Value == commandType
-}
-
 func (a *Ast) alterColumnIdentifiers(modificationType string, columnType string) []string {
 	return a.ValuesForMatch(func(node *AstNode) bool {
-		return parentIsAlterColumn(node, modificationType) && node.Type == columnType
+		return node.parentIsAlterColumn(modificationType) && node.Type == columnType
 	})
 }
 
@@ -253,9 +257,9 @@ func (a *Ast) alterColumnIdentifiers(modificationType string, columnType string)
 func (a *Ast) CreateTableColumnDeclarations() []string {
 	return a.ValuesForMatch(func(node *AstNode) bool {
 		return node.Type == "ColumnDeclaration" &&
-			parentIsType(node, "ExpressionList") &&
-			parentIsType(node.Parent, "Columns") &&
-			parentIsType(node.Parent.Parent, "CreateQuery")
+			node.parentIsType("ExpressionList") &&
+			node.Parent.parentIsType("Columns") &&
+			node.Parent.Parent.parentIsType("CreateQuery")
 	})
 }
 
@@ -282,7 +286,7 @@ func (a *Ast) MaterializeColumnIdentifiers() []string {
 
 func (a *Ast) RenameColumnFromIdentifiers() []string {
 	return a.ValuesForMatch(func(node *AstNode) bool {
-		return parentIsAlterColumn(node, "RENAME_COLUMN") &&
+		return node.parentIsAlterColumn("RENAME_COLUMN") &&
 			node.Type == "Identifier" &&
 			node.Parent.Children[0] == node
 	})
@@ -290,7 +294,7 @@ func (a *Ast) RenameColumnFromIdentifiers() []string {
 
 func (a *Ast) RenameColumnToIdentifiers() []string {
 	return a.ValuesForMatch(func(node *AstNode) bool {
-		return parentIsAlterColumn(node, "RENAME_COLUMN") &&
+		return node.parentIsAlterColumn("RENAME_COLUMN") &&
 			node.Type == "Identifier" &&
 			node.Parent.Children[1] == node
 	})
@@ -298,12 +302,63 @@ func (a *Ast) RenameColumnToIdentifiers() []string {
 
 func (a *Ast) SelectColumnIdentifiers() []string {
 	return a.ValuesForMatch(func(node *AstNode) bool {
-		return node.Type == "Identifier" && descendentOf(node, "SelectQuery")
+		return node.Type == "Identifier" && node.descendentOf("SelectQuery")
+	})
+}
+
+func (a *Ast) SelectColumnTableQualifiers() []string {
+	var values []string
+
+	for _, n := range a.SelectColumnNodes() {
+		if n.ValueQualifier != "" {
+			values = append(values, n.ValueQualifier)
+		}
+	}
+
+	return values
+}
+
+// TODO: use this for matching against aliases.
+// Special case single table select and always set valueIdentifier to table being selected from
+func (a *Ast) SelectColumnNodes() []*AstNode {
+	// TODO: handle table identifiers as a part of the column identifier. They can also be aliased...
+	// will need to construct a map of identifiers to aliases that can be used to map dependencies
+	// for this case.
+	return a.NodesForMatch(func(node *AstNode) bool {
+		if node.Type != "Identifier" {
+			return false
+		}
+
+		nearestSelectTableNodes := node.nearestSelectTableNodes()
+		if nearestSelectTableNodes == nil {
+			return false
+		}
+
+		for _, tableNode := range nearestSelectTableNodes {
+			if tableNode.Alias == node.ValueQualifier || tableNode.Value == node.ValueQualifier {
+				node.ValueQualifier = tableNode.Value
+
+				return true
+			}
+		}
+
+		return false
 	})
 }
 
 func (a *Ast) TableAndViewIdentifiers() []string {
-	return a.valuesForNodeType("TableIdentifier")
+	var values []string
+
+	a.Root.Walk(func(node *AstNode) {
+		if node.Type == "TableIdentifier" {
+			values = append(values, node.Value)
+			if node.Alias != "" {
+				values = append(values, node.Alias)
+			}
+		}
+	})
+
+	return values
 }
 
 func (a *Ast) CreateTableAndViewStatements() []string {

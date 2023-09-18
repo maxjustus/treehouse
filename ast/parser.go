@@ -30,12 +30,31 @@ var typeOnlyHandler = lineHandler{
 
 var valueStringPattern = `([^ ]*|[^ ]*'(?:.*)?'[^ ]?)`
 
-// Doesn't handle literals that contain spaces. That's a problem.
-// form will be "Literal ' '"
+func setValueAndQualifier(value string, node *AstNode) {
+	valueWithQualifier := strings.Split(value, ".")
+
+	if len(valueWithQualifier) == 2 {
+		node.ValueQualifier = valueWithQualifier[0]
+		node.Value = valueWithQualifier[1]
+	} else {
+		node.Value = value
+	}
+}
+
 var typeWithValueHandler = lineHandler{
 	Matcher: regexp.MustCompile(fmt.Sprintf("^( *)([^ ]+) +%s$", valueStringPattern)),
 	MatchCallback: func(matches []string, node *AstNode) {
-		node.Value = matches[3]
+		setValueAndQualifier(matches[3], node)
+	},
+}
+
+var typeWithTwoValuesAndMetaHandler = lineHandler{
+	Matcher: regexp.MustCompile(fmt.Sprintf(`^( *)([^ ]+) +%s +%s +\((.+)\)$`, valueStringPattern, valueStringPattern)),
+	MatchCallback: func(matches []string, node *AstNode) {
+		node.Value = matches[4]
+		// I've only encountered this node type when there's a create table with a database name specified as a part of the table name.
+		node.ValueQualifier = matches[3]
+		node.Meta = matches[5]
 	},
 }
 
@@ -50,7 +69,7 @@ var typeWithMetaHandler = lineHandler{
 var typeWithValueAndMetaHandler = lineHandler{
 	Matcher: regexp.MustCompile(fmt.Sprintf(`^( *)([^ ]+) +%s +(\(.+\))$`, valueStringPattern)),
 	MatchCallback: func(matches []string, node *AstNode) {
-		node.Value = matches[3]
+		setValueAndQualifier(matches[3], node)
 		node.Meta = matches[4]
 		node.Alias = aliasFromMeta(matches[4])
 	},
@@ -58,9 +77,10 @@ var typeWithValueAndMetaHandler = lineHandler{
 
 var allHandlers = []lineHandler{
 	typeOnlyHandler,
-	typeWithValueHandler,
 	typeWithMetaHandler,
 	typeWithValueAndMetaHandler,
+	typeWithValueHandler,
+	typeWithTwoValuesAndMetaHandler,
 }
 
 func applyLineHandlers(line string, handleMatch func(r *regexp.Regexp, line string, cb func(matches []string, line *AstNode)) bool) bool {
