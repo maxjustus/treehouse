@@ -302,7 +302,10 @@ func (a *Ast) RenameColumnToIdentifiers() []string {
 
 func (a *Ast) SelectColumnIdentifiers() []string {
 	return a.ValuesForMatch(func(node *AstNode) bool {
-		return node.Type == "Identifier" && node.descendentOf("SelectQuery")
+		return node.Type == "Identifier" &&
+			node.descendentOf("SelectQuery") &&
+			// parent of column identifiers is ExpressionList
+			!node.parentIsType("SelectQuery")
 	})
 }
 

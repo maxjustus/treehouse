@@ -28,7 +28,7 @@ var typeOnlyHandler = lineHandler{
 	MatchCallback: func(matches []string, node *AstNode) {},
 }
 
-var valueStringPattern = `([^ ]*|[^ ]*'(?:.*)?'[^ ]?)`
+var valueStringPattern = `([^ ]*(?:, .*\))?|[^ ]*'(?:.*)?'[^ ]?)`
 
 func setValueAndQualifier(value string, node *AstNode) {
 	valueWithQualifier := strings.Split(value, ".")

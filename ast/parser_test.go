@@ -54,3 +54,14 @@ func TestFunctionCalls(t *testing.T) {
 
 	assert.Equal(t, []string{"z"}, calledFunctions)
 }
+
+func TestTuples(t *testing.T) {
+	ast, err := Parse("raw query", queryWithTupleLines())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	line := ast.RawLine
+
+	assert.Equal(t, "SelectWithUnionQuery (children 1)", line)
+}
