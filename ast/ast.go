@@ -150,6 +150,8 @@ func populateDependencyGraph(asts ...*Ast) {
 	for _, ast := range asts {
 		createTableAndViewStatements := ast.CreateTableAndViewStatements()
 		createFunctionStatements := ast.CreateFunctionStatements()
+		dropTableOrViewStatements := ast.DropTableOrViewStatements()
+		renameIdentifiers := ast.RenameIdentifiers()
 
 		selectColumnIdentifiers := ast.SelectColumnIdentifiers()
 
@@ -174,6 +176,9 @@ func populateDependencyGraph(asts ...*Ast) {
 
 				ast.addDependentIfContainsAny(candidate, createTableAndViewStatements, candidate.AlterQueryStatements())
 				ast.addDependentIfContainsAny(candidate, createFunctionStatements, candidate.FunctionCalls())
+				ast.addDependentIfContainsAny(candidate, createTableAndViewStatements, candidate.RenameIdentifiers())
+				ast.addDependentIfContainsAny(candidate, dropTableOrViewStatements, candidate.TableAndViewIdentifiers())
+				ast.addDependentIfContainsAny(candidate, renameIdentifiers, candidate.DropTableOrViewStatements())
 
 				// wayyy slower now with all of this - TODO: optimize
 
@@ -348,7 +353,7 @@ func (a *Ast) SelectColumnNodes() []*AstNode {
 	})
 }
 
-var createTableAsTableRegexp = regexp.MustCompile(`(?i)create\s+table\s+(?:[^\s]+).*as\s+(?:\w+\.)?(\w+).*`)
+var createTableAsTableRegexp = regexp.MustCompile(`(?is)create(?:\s+or\s+replace)?\s+table\s+(?:[^\s]+).*as\s+(?:\w+\.)?(\w+).*`)
 
 func (a *Ast) TableAndViewIdentifiers() []string {
 	var values []string
@@ -381,6 +386,29 @@ func (a *Ast) CreateTableAndViewStatements() []string {
 
 func (a *Ast) AlterQueryStatements() []string {
 	return a.valuesForNodeType("AlterQuery")
+}
+
+func (a *Ast) DropTableOrViewStatements() []string {
+	return a.valuesForNodeType("DropQuery")
+}
+
+// must come after any create and before any drop
+func (a *Ast) RenameIdentifiers() []string {
+	var values []string
+
+	nodes := a.NodesForMatch(func(node *AstNode) bool {
+		return node.Type == "Rename"
+	})
+
+	for _, node := range nodes {
+		for _, child := range node.Children {
+			if child.Type == "Identifier" {
+				values = append(values, child.Value)
+			}
+		}
+	}
+
+	return values
 }
 
 func (a *Ast) FunctionCalls() []string {

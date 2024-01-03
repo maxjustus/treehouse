@@ -43,7 +43,7 @@ func TestSortedQueriesFromDependencyGraph(t *testing.T) {
 
 func TestQueriesInTopologicalOrder(t *testing.T) {
 	t1 := "create table db.t1 (z Int64) engine=MergeTree order by z"
-	t2 := "create table db.t1_dist engine=Distributed as db.t1"
+	t2 := "create or replace table db.t1_dist engine=Distributed as db.t1"
 	a1 := "alter table t1 add column b UInt8"
 	trunc1 := "truncate table t1"
 	s1 := "select * from t1"
@@ -149,6 +149,34 @@ func TestColumnQueriesInTopologicalOrder(t *testing.T) {
 		q12,
 		q4,
 	}
+
+	assert.Equal(t, expected, out)
+}
+
+func TestExchangeTableDropTable(t *testing.T) {
+	q1 := "create table t1 on cluster default (z Int64) engine=MergeTree order by z"
+	q2 := `create or replace table t2
+on cluster default
+as t1
+engine=Distributed('default', 'default', t1, rand())`
+	q3 := "exchange tables t1 and t2 on cluster default"
+	q4 := "drop table t2 on cluster default"
+
+	expected := []string{
+		q1,
+		q2,
+		q3,
+		q4,
+	}
+
+	out, err := QueriesInTopologicalOrder([]string{
+		q4,
+		q3,
+		q2,
+		q1,
+	}, clickhouse_local.ExecQuery)
+
+	assert.NoError(t, err)
 
 	assert.Equal(t, expected, out)
 }
