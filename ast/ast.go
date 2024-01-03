@@ -64,7 +64,6 @@ func matchesAny[T, B any](a []T, b []B, matcher func(a T, b B) bool) bool {
 	return false
 }
 
-// TODO: explore adding caching or multithreading of querying for ASTs - if perf necessitates..?
 func QueriesInTopologicalOrder(queries []string, execQueryFunc ExecQueryFunc) ([]string, error) {
 	asts := make([]*Ast, 0, len(queries))
 
@@ -349,8 +348,20 @@ func (a *Ast) SelectColumnNodes() []*AstNode {
 	})
 }
 
+var createTableAsTableRegexp = regexp.MustCompile(`(?i)create\s+table\s+(?:[^\s]+).*as\s+(?:\w+\.)?(\w+).*`)
+
 func (a *Ast) TableAndViewIdentifiers() []string {
 	var values []string
+
+	switch a.Root.Type {
+	case "CreateQuery":
+		matches := createTableAsTableRegexp.FindStringSubmatch(a.Query)
+		if len(matches) > 0 {
+			values = append(values, matches[1])
+		}
+	case "TruncateQuery":
+		values = append(values, a.Root.Children[0].Value)
+	}
 
 	a.Root.Walk(func(node *AstNode) {
 		if node.Type == "TableIdentifier" {

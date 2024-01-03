@@ -10,7 +10,7 @@ import (
 // Most of the runtime comes from starting clickhouse-local.
 func ExecQuery(query string) ([]map[string]interface{}, error) {
 	// invoke clickhouse-local command below using shell
-	out, err := exec.Command("sh", "-c", "clickhouse-local --query \""+query+"\" --output-format=\"JSONEachRow\"").Output()
+	out, err := exec.Command("sh", "-c", "clickhouse local --query \""+query+"\" --output-format=\"JSONEachRow\"").Output()
 
 	outLines := strings.Split(string(out), "\n")
 	var parsedOutLines []map[string]interface{}
